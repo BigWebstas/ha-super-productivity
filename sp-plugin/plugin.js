@@ -5,15 +5,17 @@
  * - plugin.js = credential manager + HA API proxy + rules engine (survives navigation)
  * - index.html (iframe) = UI only, communicates via window.parent.haBridge
  * 
- * SECURITY: haToken stored via PluginAPI.setSecret() (never synced/exported).
- * Non-secret config stored via PluginAPI.persistDataSynced().
+ * SECURITY: haToken stored via PluginAPI.setSecret() by default (never synced/exported).
+ * If the user opts into config.syncToken, the token instead rides in the synced
+ * config (PluginAPI.persistDataSynced) so it follows them across devices, at the
+ * cost of sitting in plaintext in sync storage and any backup/export.
  */
 
 // ============================================================
 // CONFIG & SECRETS
 // ============================================================
 
-let config = { haUrl: '', webhookId: '', rules: [], showSensors: '' };
+let config = { haUrl: '', webhookId: '', rules: [], showSensors: '', syncToken: false };
 let haToken = '';
 let configReady = false;
 
@@ -23,8 +25,11 @@ async function loadConfig() {
     const raw = await PluginAPI.loadSyncedData();
     if (raw && raw.length > 2) {
       const parsed = JSON.parse(raw);
-      // Migration: if old config has token in synced data, move to secrets
-      if (parsed.haToken || parsed._token) {
+      // Migration: old config versions could leak a token into synced data
+      // via `_token`, or without syncToken opted in. Only that case gets moved
+      // to local secret storage; an intentional parsed.syncToken + haToken pair
+      // is left alone and read normally below.
+      if (parsed._token || (parsed.haToken && !parsed.syncToken)) {
         const tok = parsed.haToken || parsed._token;
         await PluginAPI.setSecret('haToken', tok);
         haToken = tok;
@@ -38,11 +43,16 @@ async function loadConfig() {
   } catch (e) { console.log('[HA Bridge] Config load error:', e); }
   if (!config.rules) config.rules = [];
 
-  // Load token from secret storage (local-only, never synced)
-  try {
-    const secret = await PluginAPI.getSecret('haToken');
-    if (secret) haToken = secret;
-  } catch (e) { console.log('[HA Bridge] getSecret error:', e); }
+  if (config.syncToken && config.haToken) {
+    // User opted in: token travels with synced data (visible in plaintext there).
+    haToken = config.haToken;
+  } else {
+    // Default: load token from secret storage (local-only, never synced)
+    try {
+      const secret = await PluginAPI.getSecret('haToken');
+      if (secret) haToken = secret;
+    } catch (e) { console.log('[HA Bridge] getSecret error:', e); }
+  }
 
   configReady = true;
   console.log('[HA Bridge] Config ready:', config.rules.length, 'rules, haUrl:', config.haUrl ? 'set' : 'empty', 'token:', haToken ? 'set' : 'empty');
@@ -50,10 +60,14 @@ async function loadConfig() {
 }
 
 async function saveConfig() {
-  // Never include token in synced data
   const safe = { ...config };
-  delete safe.haToken;
   delete safe._token;
+  if (config.syncToken) {
+    // User opted in: token rides along in synced data (plaintext, exportable/backed up).
+    safe.haToken = haToken;
+  } else {
+    delete safe.haToken;
+  }
   try {
     await PluginAPI.persistDataSynced(JSON.stringify(safe));
     console.log('[HA Bridge] Config saved');
@@ -62,10 +76,18 @@ async function saveConfig() {
 
 async function saveToken(token) {
   haToken = token;
-  try {
-    await PluginAPI.setSecret('haToken', token);
-    console.log('[HA Bridge] Token saved to secrets');
-  } catch (e) { console.log('[HA Bridge] setSecret error:', e); }
+  if (config.syncToken) {
+    // Opted into sync: keep it out of local secret storage, let saveConfig sync it.
+    try { await PluginAPI.setSecret('haToken', ''); } catch (e) { /* best effort cleanup */ }
+    await saveConfig();
+  } else {
+    try {
+      await PluginAPI.setSecret('haToken', token);
+      console.log('[HA Bridge] Token saved to secrets');
+    } catch (e) { console.log('[HA Bridge] setSecret error:', e); }
+    // Make sure a previously-synced token doesn't linger in synced data.
+    await saveConfig();
+  }
 }
 
 // ============================================================
@@ -120,8 +142,15 @@ const haBridge = {
     config.haUrl = (settings.haUrl || '').replace(/\/$/, '');
     config.webhookId = settings.webhookId || '';
     config.showSensors = settings.showSensors || '';
+    const syncToggled = !!settings.syncToken !== !!config.syncToken;
+    config.syncToken = !!settings.syncToken;
     await saveConfig();
-    if (settings.token) await saveToken(settings.token);
+    if (settings.token) {
+      await saveToken(settings.token);
+    } else if (syncToggled && haToken) {
+      // Move the existing token between secret storage and synced data.
+      await saveToken(haToken);
+    }
     return true;
   },
   

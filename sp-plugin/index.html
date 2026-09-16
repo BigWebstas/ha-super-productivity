@@ -4,8 +4,8 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>HA Bridge</title>
 <style>
-:root{--bg:var(--background-color,#1e1e2e);--card:var(--card-background-color,rgba(127,127,127,0.08));--border:var(--border-color,rgba(127,127,127,0.2));--text:var(--primary-text-color,#e0e0e0);--dim:var(--secondary-text-color,rgba(127,127,127,0.7));--accent:var(--accent-color,#42a5f5);--success:#66bb6a;--warn:#ffa726;--err:#ef5350;--r:10px}
-*{box-sizing:border-box;margin:0;padding:0}body{font-family:var(--font-family,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif);color:var(--text);background:var(--bg);font-size:13px;line-height:1.5}
+:root{--bg:var(--bg,#1e1e2e);--card:var(--card-bg,rgba(127,127,127,0.08));--border:var(--divider-color,rgba(127,127,127,0.2));--text:var(--text-color,#e0e0e0);--dim:var(--text-color-muted,rgba(127,127,127,0.7));--accent:var(--c-primary,#42a5f5);--success:#66bb6a;--warn:var(--c-warn,#ffa726);--err:#ef5350;--r:var(--card-border-radius,10px)}
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:var(--font-primary-stack,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif);color:var(--text);background:var(--bg);font-size:13px;line-height:1.5}
 .tabs{display:flex;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10;backdrop-filter:blur(8px)}
 .tab{flex:1;padding:10px 4px;text-align:center;font-size:.75em;font-weight:500;opacity:.5;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s}
 .tab:hover{opacity:.8}.tab.active{opacity:1;border-bottom-color:var(--accent);color:var(--accent)}
@@ -17,6 +17,7 @@
 .btn:hover{background:rgba(255,255,255,.08)}.btn.accent{border-color:rgba(66,165,245,.4);color:var(--accent)}.btn.success{border-color:rgba(102,187,106,.4);color:var(--success)}.btn.warn{border-color:rgba(255,167,38,.4);color:var(--warn)}.btn.err{border-color:rgba(239,83,80,.4);color:var(--err)}.btn.sm{width:auto;padding:5px 10px;font-size:.75em;display:inline-flex}
 .field{margin-bottom:10px}.field label{display:block;font-size:.78em;opacity:.6;margin-bottom:3px}
 .field input,.field select,.field textarea{width:100%;padding:7px 9px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.88em}
+.field select option{background:#fff;color:#111}
 .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--accent)}.field .hint{font-size:.72em;opacity:.35;margin-top:2px}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:8px;font-size:.72em;font-weight:500}
 .badge.ok{background:rgba(76,175,80,.15);color:var(--success)}.badge.err{background:rgba(244,67,54,.15);color:var(--err)}
@@ -127,6 +128,8 @@
 <div class="card"><div class="card-title">Connection</div>
 <div class="field"><label>Home Assistant URL</label><input id="cfg-url" placeholder="http://homeassistant.local:8123"><div class="hint">Local URL only</div></div>
 <div class="field"><label>Access Token</label><input id="cfg-token" type="password" placeholder="eyJ..."></div>
+<div class="field"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="cfg-sync-token" style="width:auto"> Sync token across devices</label>
+<div class="hint" style="color:var(--warn)">⚠ Stores the token in synced data so it follows you to other devices. It will then sit in plaintext in your sync provider and in any backup/export of this plugin's data. Leave off unless you need it.</div></div>
 <div class="field"><label>Webhook ID</label><input id="cfg-webhook" placeholder="super_productivity_01KX..."></div>
 </div>
 <div class="card"><div class="card-title">Display Sensors</div>
@@ -177,6 +180,7 @@ async function loadConfig(){
   config.webhookId = cfg.webhookId || '';
   config.rules = cfg.rules || [];
   config.showSensors = cfg.showSensors || '';
+  config.syncToken = !!cfg.syncToken;
   haToken = b.getTokenMasked(); // only get masked version for display
   console.log('[HA UI] Config from bridge:', config.rules.length, 'rules, URL:', config.haUrl ? 'set' : 'empty');
   populateSettings();
@@ -190,6 +194,7 @@ async function saveConfig(){
     haUrl: config.haUrl,
     webhookId: config.webhookId,
     showSensors: config.showSensors,
+    syncToken: document.getElementById('cfg-sync-token').checked,
     token: tokenInput || undefined, // only send if user entered/changed it
   });
   // Save rules separately
@@ -201,6 +206,7 @@ function populateSettings(){
 document.getElementById('cfg-url').value=config.haUrl||'';
 document.getElementById('cfg-token').value=''; // never pre-fill token for security
 document.getElementById('cfg-token').placeholder=haToken?'Token saved (enter new to change)':'Enter token...';
+document.getElementById('cfg-sync-token').checked=!!config.syncToken;
 document.getElementById('cfg-webhook').value=config.webhookId||'';
 renderSensorList();
 }
