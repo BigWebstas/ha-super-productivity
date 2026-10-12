@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 *.pyo
 
+GEMINI.md
+.idea/
+CLAUDE.md
